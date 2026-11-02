@@ -1,11 +1,13 @@
 // transformers.js baseline (ONNX q4f16 on WebGPU) with the same generate() contract as webyiq.js.
 import { AutoModelForCausalLM, InterruptableStoppingCriteria, Tensor, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1";
+import { HOSTED } from "./models.js";
 
-env.allowRemoteModels = false;
-env.allowLocalModels = true;
+// local dev server: models/onnx/<id>; hosted demo: the Hugging Face Hub
+env.allowRemoteModels = HOSTED;
+env.allowLocalModels = !HOSTED;
 env.localModelPath = new URL("../models/onnx/", location.href).href;
 
-/** Load an ONNX model from models/onnx/<id>. onProgress({ phase, bytes, total }). */
+/** Load an ONNX model (models/onnx/<id> or a Hub repo, see models.js). onProgress({ phase, bytes, total }). */
 export async function loadTjs(id, { eos, onProgress = () => {} } = {}) {
   const t0 = performance.now();
   const files = new Map();

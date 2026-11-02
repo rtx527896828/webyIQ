@@ -15,6 +15,14 @@ for line in lines:
             print(f"transformers.js {r['adapter']}: prompt {r['prompt_tokens']}: ttft {r['ttft_ms']} ms, "
                   f"prefill {r['prefill_tok_s']} tok/s, decode {r['decode_tok_s']} tok/s, load {r['load_ms']} ms")
         continue
+    if "compare" in d:
+        c = d["compare"]
+        print("compare on", c["adapter"])
+        for r in c["results"]:
+            print(f"  {r['engine']:<42} chat: ttft {r['chat_ttft_ms']:>7} ms, decode {r['chat_decode_tok_s']:>6} tok/s | "
+                  f"long ({r['long_prompt_tokens']} tok): ttft {r['long_ttft_ms']} ms ({r['long_prefill_tok_s']} tok/s) | load {r['load_ms']} ms")
+            print("     ", " | ".join(x.replace(chr(10), " ")[:50] for x in r["samples"]))
+        continue
     if "chattest" in d or "agenttest" in d:
         print(json.dumps(d.get("chattest") or d.get("agenttest"), ensure_ascii=False, indent=1)[:4000])
         continue

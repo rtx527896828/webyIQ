@@ -21,6 +21,8 @@
   <h3>Model</h3>
   <div class="row">
     <select id="source">
+      <option value="url:https://huggingface.co/tixiren/Qwen3.5-2B-webyIQ/resolve/main/">Qwen3.5-2B · Hugging Face</option>
+      <option value="url:https://huggingface.co/tixiren/MiniCPM5-2B-webyIQ/resolve/main/">MiniCPM5-2B · Hugging Face</option>
       <option value="url:http://127.0.0.1:8765/models/qwen3.5-2b-gptq/">Qwen3.5-2B · local server</option>
       <option value="url:http://127.0.0.1:8765/models/minicpm5-2b-gptq/">MiniCPM5-2B · local server</option>
       <option value="custom">Model URL…</option>
@@ -31,7 +33,7 @@
   <input id="url" type="url" placeholder="https://…/qwen3.5-2b-gptq/" hidden>
   <div class="hint" id="folderhint" hidden>Pick a converted webyIQ model folder (manifest.json + shards).</div>
   <div class="progress" id="bar" hidden><i></i></div>
-  <div class="info" id="info">Weights are cached after the first load.</div>
+  <div class="info" id="info">About 1.1 GB on first load, then cached.</div>
 </section>
 
 <section class="card box">

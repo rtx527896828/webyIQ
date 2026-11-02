@@ -82,7 +82,7 @@
     <div class="nav-links">
       <a href="chat.html">Chat arena</a>
       <a class="active" href="agent.html">Browser agent</a>
-      <a href="index.html">Benchmarks</a>
+      <a href="https://github.com/rtx527896828/webyIQ">GitHub</a>
     </div>
   </nav>
 
@@ -169,7 +169,7 @@
 </div>
 
 <script type="module">
-import { MODELS } from "./lib/models.js";
+import { MODELS, HOSTED, modelDir, onnxId } from "./lib/models.js";
 import { loadWebyiq, loadTokenizer } from "./lib/webyiq.js";
 import { loadTjs } from "./lib/tjs.js";
 import { observePage, actOnPage } from "./lib/dom-agent.js";
@@ -209,16 +209,17 @@ async function load() {
     bar.querySelector("i").style.width = `${Math.round(frac * 100)}%`;
   };
   try {
-    tokenizer = await loadTokenizer(m.dir);
+    const dir = modelDir(m);
+    tokenizer = await loadTokenizer(dir);
     if ($("backend").value === "w") {
-      backend = await loadWebyiq(m.dir, {
+      backend = await loadWebyiq(dir, {
         tokenizer,
         onProgress: (p) => prog(p.phase === "weights" ? `Loading ${m.name}: ${p.done}/${p.total} shards` : "Compiling kernels…", p.phase === "weights" ? p.done / p.total : 1),
       });
       $("loadinfo").textContent = `webyIQ · ${m.name} on ${backend.gpuName} · ready in ${(backend.loadMs / 1000).toFixed(1)} s`;
     } else {
-      const eos = (await (await fetch(new URL(m.dir + "manifest.json", location.href))).json()).config.eos_token_ids;
-      backend = await loadTjs(m.onnx, {
+      const eos = (await (await fetch(new URL(dir + "manifest.json", location.href))).json()).config.eos_token_ids;
+      backend = await loadTjs(onnxId(m), {
         eos,
         onProgress: (p) => prog(p.phase === "weights" ? `Loading ${m.name} (ONNX)` : "Compiling kernels…", p.phase === "weights" ? p.bytes / p.total : 1),
       });
@@ -356,7 +357,18 @@ $("goal").value = current.goal;
 $("load").onclick = load;
 $("run").onclick = () => run($("goal").value.trim(), current.start);
 $("stop").onclick = () => abort?.abort();
-navigate(current.start);
+if (HOSTED) {
+  // pages reach this frame through the local dev server's proxy; a static host has none
+  $("veil").classList.add("on");
+  $("veil").innerHTML = `<div style="max-width:420px;text-align:center;line-height:1.6;padding:20px">This demo drives real web pages through the
+    local dev server's proxy, which a static site cannot provide.<br><br>Run it locally (<code>node tools/serve.mjs</code>) or use the
+    <a href="https://github.com/rtx527896828/webyIQ#browser-extension-extension">browser extension</a>, which works on any page.</div>`;
+  $("veil").style.pointerEvents = "auto";
+  $("run").disabled = true;
+  $("load").disabled = true;
+} else {
+  navigate(current.start);
+}
 
 // test hook: ?autotest=<task index>[&model=..&backend=w|t&steps=N&debug] runs one task and reports the trace
 if (q.has("autotest")) {

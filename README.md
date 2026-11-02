@@ -6,12 +6,24 @@ kernels, a GPU-resident decode loop, speculative decoding with the model's own M
 weights. The same engine runs natively (wgpu on Vulkan / DX12) for development and in the browser as a
 ~390 KB wasm module.
 
-| Qwen3.5-2B, Chrome, RTX 5080 | webyIQ | transformers.js 4.3 (official ONNX q4f16) |
-|---|---|---|
-| first token, 128-token prompt | **25 ms** | 16.3 s |
-| generation (chat prompts) | **581 tok/s** (MTP speculative) | 31 tok/s |
-| AMD Radeon iGPU (2 CUs), generation | **37 tok/s** | device lost |
-| WikiText-2 perplexity vs bf16 | +2.4% (int4 GPTQ) | |
+**[Online demo](https://rtx527896828.github.io/webyIQ/)** (Chrome / Edge with WebGPU; the model, about 1.1 GB,
+downloads once from the Hugging Face Hub and runs on your GPU).
+
+Same model (Qwen3.5-2B), same prompts, Chrome 156, greedy:
+
+| | webyIQ | WebLLM 0.2.87 (MLC q4f16_1) | transformers.js 4.3 (ONNX q4f16) |
+|---|---|---|---|
+| RTX 5080, generation | **620 tok/s** (MTP speculative), 417 plain | 94 tok/s | 31 tok/s |
+| RTX 5080, ~1,050-token prompt | **0.20 s** (5,200 tok/s) | 0.81 s (1,310 tok/s) | 128.7 s (1,024 tokens) |
+| RTX 5080, first token of a chat reply | **14 ms** | 46 ms | 16.3 s (128 tokens) |
+| AMD Radeon iGPU (2 CUs), generation | **37 tok/s** | 4.7 tok/s | device lost |
+| AMD iGPU, ~1,050-token prompt | **9.1 s** | 66 s | – |
+| Load from cache (5080) | 1.9 s | 7.6 s | |
+
+Weights: int4 GPTQ, WikiText-2 perplexity +2.4% over bf16. Speculative decoding verifies every draft
+token, so the output is the same as plain greedy decoding.
+
+![Chat arena: webyIQ and transformers.js answer the same question](docs/chat-arena.jpg)
 
 Supported models: **Qwen3.5-2B** (Gated DeltaNet + gated attention, MTP head) and **MiniCPM5-2B**
 (Llama architecture). Each one is a graph built from a few specialized kernels, see [Kernels](#kernels).
@@ -25,11 +37,19 @@ What you can try:
 - **Browser extension** (`extension/`): the same agent in a Chrome / Edge side panel, on any page you
   open.
 
+![Browser agent: a local model answers a two-step question on Wikipedia](docs/browser-agent.jpg)
+
+Converted weights: [tixiren/Qwen3.5-2B-webyIQ](https://huggingface.co/tixiren/Qwen3.5-2B-webyIQ),
+[tixiren/MiniCPM5-2B-webyIQ](https://huggingface.co/tixiren/MiniCPM5-2B-webyIQ) (Apache-2.0, as the
+original models). The extension and the online demo load them from there.
+
 Status: a research prototype, tested on Windows with Chrome / Edge 156 (RTX 5080 and an AMD Radeon
-iGPU). Safari and mobile are untested. Converted weights are not hosted yet: you convert them yourself
-from the Hugging Face checkpoints (below; the models' own licenses apply).
+iGPU). Safari and mobile are untested.
 
 ## Quick start
+
+To run the demo pages locally with the hosted weights, only the wasm build is needed (step 2; open the
+pages with `?hub`). To convert the models yourself:
 
 Requirements: Rust (stable) with `wasm32-unknown-unknown` and [wasm-pack](https://rustwasm.github.io/wasm-pack/),
 Node.js 18+, [uv](https://docs.astral.sh/uv/) (Python tools, CPU PyTorch), a browser with WebGPU.
@@ -46,7 +66,7 @@ cd ..
 # 2. engine for the browser, then the pages
 wasm-pack build crates/web --target web --release --out-dir ../../web/pkg
 node tools/serve.mjs
-# open http://127.0.0.1:8765/web/chat.html (or agent.html, index.html for benchmarks)
+# open http://127.0.0.1:8765/web/chat.html (or agent.html; index.html, compare.html: benchmarks)
 
 # 3. optional: the extension
 node tools/build-extension.mjs   # then chrome://extensions -> Developer mode -> Load unpacked -> extension/
@@ -64,7 +84,7 @@ transformers.js side of the chat arena reads ONNX models from `models/onnx/` (`Q
 | `crates/engine/src/shaders` | WGSL kernels (see below) |
 | `crates/cli` | Native runner: `--ref` correctness check vs torch, `--bench`, `--profile` (GPU timestamps), `--ppl`, `--spec` (speculative vs plain) |
 | `crates/web` | wasm-bindgen wrapper (`WebEngine`) |
-| `web/index.html` | Browser bench + chat page; `web/tjs.html` transformers.js baseline, same protocol |
+| `web/index.html` | Browser bench + chat page; `web/tjs.html` transformers.js baseline, same protocol; `web/compare.html` webyIQ vs WebLLM on chat prompts |
 | `tools/convert.py` | HF safetensors -> webyIQ int4 format (`manifest.json` + <=128 MB shards) |
 | `tools/reference.py` | torch reference logits, optional identical int4 fake-quant |
 | `tools/onnx-export` | ONNX q4f16 export of the same model for the transformers.js baseline |

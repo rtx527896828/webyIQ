@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>webyIQ vs WebLLM</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 920px; margin: 24px auto; padding: 0 16px; }
+  pre { background: color-mix(in srgb, currentColor 6%, transparent); padding: 10px; border-radius: 6px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>webyIQ vs WebLLM, Qwen3.5-2B</h1>
+<p>Same chat prompts on both engines, greedy, thinking off, one engine at a time. WebLLM: MLC
+<code>Qwen3.5-2B-q4f16_1-MLC</code>; webyIQ: int4 GPTQ (speculative decoding as chosen at load, and plain).
+<code>?autobench</code> runs everything and posts the result to the dev server.</p>
+<button id="run">Run</button>
+<pre id="out">idle</pre>
+
+<script type="module">
+import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.87/+esm";
+import { loadWebyiq, chatIds } from "./lib/webyiq.js";
+
+const $ = (id) => document.getElementById(id);
+const log = (s) => { $("out").textContent += "\n" + s; console.log(s); };
+const PROMPTS = [
+  "Explain how a hash map works and when you would use one instead of a sorted array.",
+  "用三段话介绍一下长城的历史。",
+  "Write a Python function that returns the n-th Fibonacci number iteratively, with a docstring.",
+  "What are the main differences between TCP and UDP? Answer with a short table.",
+];
+const MAX_TOKENS = 200;
+const longText = await (await fetch("../tools/prompts/long_en.txt")).text();
+const LONG = `${Array(5).fill(longText).join("\n\n")}\n\nSummarize the text above in two sentences.`;
+
+const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+
+async function benchWebllm() {
+  log("WebLLM: loading…");
+  const t0 = performance.now();
+  const engine = await webllm.CreateMLCEngine("Qwen3.5-2B-q4f16_1-MLC", {
+    initProgressCallback: (p) => ($("out").dataset.p = p.text),
+  });
+  const loadMs = performance.now() - t0;
+  const run = async (content, maxTokens) => {
+    const ts = performance.now();
+    let first = 0, last = 0, text = "", usage = null;
+    const stream = await engine.chat.completions.create({
+      messages: [{ role: "user", content }], temperature: 0, max_tokens: maxTokens, stream: true,
+      stream_options: { include_usage: true }, extra_body: { enable_thinking: false },
+    });
+    for await (const chunk of stream) {
+      const d = chunk.choices[0]?.delta?.content;
+      if (d) {
+        last = performance.now();
+        first ||= last;
+        text += d;
+      }
+      if (chunk.usage) usage = chunk.usage;
+    }
+    const n = usage.completion_tokens;
+    return { ttftMs: first - ts, decodeTokS: (n - 1) / (last - first) * 1000, tokens: n, promptTokens: usage.prompt_tokens,
+      internal: { ttft_s: usage.extra.time_to_first_token_s, prefill: usage.extra.prefill_tokens_per_s, decode: usage.extra.decode_tokens_per_s }, text };
+  };
+  await run("Hi", 8); // warm-up
+  const chats = [];
+  for (const p of PROMPTS) chats.push(await run(p, MAX_TOKENS));
+  const long = await run(LONG, 32);
+  await engine.unload();
+  return summarize("WebLLM 0.2.87 (MLC q4f16_1)", loadMs, chats, long);
+}
+
+async function benchWebyiq() {
+  log("webyIQ: loading…");
+  const w = await loadWebyiq("../models/qwen3.5-2b-gptq/");
+  const run = async (content, maxTokens) => {
+    const ids = chatIds(w.tokenizer, [{ role: "user", content }]);
+    const r = await w.generate(ids, { maxTokens });
+    return { ttftMs: r.ttftMs, decodeTokS: r.decodeTokS, tokens: r.ids.length, promptTokens: r.promptTokens, text: w.tokenizer.decode(r.ids, { skip_special_tokens: true }) };
+  };
+  const results = [];
+  for (const spec of w.engine.has_speculative ? [w.spec?.on ?? false, false].filter((v, i, a) => a.indexOf(v) === i) : [false]) {
+    w.engine.set_speculative(spec);
+    await run("Hi", 8);
+    const chats = [];
+    for (const p of PROMPTS) chats.push(await run(p, MAX_TOKENS));
+    const long = await run(LONG, 32);
+    results.push(summarize(`webyIQ (int4 GPTQ${spec ? ", MTP speculative" : ""})`, w.loadMs, chats, long));
+  }
+  w.dispose();
+  return results;
+}
+
+function summarize(engine, loadMs, chats, long) {
+  const s = {
+    engine, load_ms: Math.round(loadMs),
+    chat_ttft_ms: +mean(chats.map((c) => c.ttftMs)).toFixed(1),
+    chat_decode_tok_s: +(chats.reduce((a, c) => a + c.tokens - 1, 0) / chats.reduce((a, c) => a + (c.tokens - 1) / c.decodeTokS, 0)).toFixed(1),
+    long_prompt_tokens: long.promptTokens, long_ttft_ms: +long.ttftMs.toFixed(1),
+    long_prefill_tok_s: +(long.promptTokens / long.ttftMs * 1000).toFixed(1),
+    samples: chats.map((c) => c.text.slice(0, 80)),
+  };
+  if (chats[0].internal) s.internal = chats.map((c) => c.internal);
+  log(JSON.stringify(s, null, 1));
+  return s;
+}
+
+async function runAll() {
+  $("out").textContent = "";
+  const gpu = (await navigator.gpu.requestAdapter({ powerPreference: "high-performance" })).info;
+  const out = { adapter: `${gpu.vendor} ${gpu.architecture} ${gpu.description}`.trim(), results: [] };
+  out.results.push(await benchWebllm());
+  out.results.push(...(await benchWebyiq()));
+  return out;
+}
+
+$("run").onclick = () => runAll().catch((e) => log("error: " + (e.stack || e)));
+if (new URLSearchParams(location.search).has("autobench")) {
+  runAll()
+    .then((out) => fetch("/report", { method: "POST", body: JSON.stringify({ compare: out }) }))
+    .catch((e) => fetch("/report", { method: "POST", body: JSON.stringify({ error: String(e.stack || e) }) }));
+}
+</script>
+</body>
+</html>

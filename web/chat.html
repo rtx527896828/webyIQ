@@ -71,7 +71,7 @@
     <div class="nav-links">
       <a class="active" href="chat.html">Chat arena</a>
       <a href="agent.html">Browser agent</a>
-      <a href="index.html">Benchmarks</a>
+      <a href="https://github.com/rtx527896828/webyIQ">GitHub</a>
     </div>
   </nav>
 
@@ -150,7 +150,7 @@
 <script type="module">
 import { marked } from "https://cdn.jsdelivr.net/npm/marked@12.0.2/lib/marked.esm.js";
 import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.es.mjs";
-import { MODELS } from "./lib/models.js";
+import { MODELS, modelDir, onnxId } from "./lib/models.js";
 import { loadWebyiq, loadTokenizer, chatIds } from "./lib/webyiq.js";
 import { loadTjs } from "./lib/tjs.js";
 
@@ -236,11 +236,12 @@ async function load() {
   busy = true;
   const m = MODELS[modelId];
   try {
-    tokenizer = await loadTokenizer(m.dir);
-    const eos = (await (await fetch(new URL(m.dir + "manifest.json", location.href))).json()).config.eos_token_ids;
+    const dir = modelDir(m);
+    tokenizer = await loadTokenizer(dir);
+    const eos = (await (await fetch(new URL(dir + "manifest.json", location.href))).json()).config.eos_token_ids;
 
     status(lanes.w, "loading", "run");
-    lanes.w.backend = await loadWebyiq(m.dir, {
+    lanes.w.backend = await loadWebyiq(dir, {
       tokenizer,
       onProgress: (p) => progress(lanes.w, p.phase === "weights" ? `weights ${p.done}/${p.total} · ${(p.bytes / 2 ** 30).toFixed(2)} GiB` : "compiling kernels…", p.phase === "weights" ? p.done / p.total : 1),
     });
@@ -257,7 +258,7 @@ async function load() {
 
     status(lanes.t, "loading", "run");
     try {
-      lanes.t.backend = await loadTjs(m.onnx, {
+      lanes.t.backend = await loadTjs(onnxId(m), {
         eos,
         onProgress: (p) => progress(lanes.t, p.phase === "weights" ? `weights ${(p.bytes / 2 ** 30).toFixed(2)} / ${(p.total / 2 ** 30).toFixed(2)} GiB` : "compiling kernels…", p.phase === "weights" ? p.bytes / p.total : 1),
       });
