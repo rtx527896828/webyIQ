@@ -25,6 +25,8 @@ token, so the output is the same as plain greedy decoding.
 
 ![Chat arena: webyIQ and transformers.js answer the same question](docs/chat-arena.jpg)
 
+Videos: [chat arena replay](docs/chat.mp4) · [browser agent](docs/agent.mp4)
+
 Supported models: **Qwen3.5-2B** (Gated DeltaNet + gated attention, MTP head) and **MiniCPM5-2B**
 (Llama architecture). Each one is a graph built from a few specialized kernels, see [Kernels](#kernels).
 
