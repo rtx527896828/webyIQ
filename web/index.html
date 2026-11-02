@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>webyIQ bench</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fafafa; --muted: #6e6e73; --line: #d2d2d7; --accent: #0a66c2; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #f5f5f7; --bg: #161617; --muted: #a1a1a6; --line: #3a3a3c; --accent: #4ea1ff; } }
+  body { font: 14px/1.5 system-ui, sans-serif; color: var(--fg); background: var(--bg); max-width: 920px; margin: 24px auto; padding: 0 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .muted { color: var(--muted); }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 14px 0; }
+  legend { padding: 0 6px; font-weight: 600; }
+  label { margin-right: 14px; white-space: nowrap; }
+  input[type=number] { width: 72px; }
+  button { padding: 5px 12px; margin-right: 6px; }
+  pre { background: color-mix(in srgb, var(--fg) 6%, transparent); padding: 10px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 60px; font: inherit; }
+  #out { min-height: 80px; }
+</style>
+</head>
+<body>
+<h1>webyIQ</h1>
+<div class="muted">Model-specialized WebGPU LLM engine (Rust + WGSL) — benchmark page</div>
+
+<fieldset>
+  <legend>Setup</legend>
+  <label>Model <input id="model" value="../models/minicpm5-2b-gptq/" size="34"></label>
+  <label>GPU <select id="gpu"><option value="hp">high-performance</option><option value="lp">low-power</option></select></label>
+  <label>Context <input id="ctx" type="number" value="4096"></label>
+  <button id="load">Load</button>
+  <div id="status" class="muted">idle</div>
+</fieldset>
+
+<fieldset>
+  <legend>Benchmark</legend>
+  <label>Prompt tokens <input id="plen" type="number" value="128"></label>
+  <label>Decode tokens <input id="dlen" type="number" value="128"></label>
+  <button id="bench" disabled>Run</button>
+  <button id="profile" disabled>Profile step</button>
+  <button id="chatbench" disabled>Chat bench (plain vs speculative)</button>
+  <pre id="bench-out"></pre>
+</fieldset>
+
+<fieldset>
+  <legend>Chat (greedy)</legend>
+  <textarea id="prompt">用三句话介绍一下 WebGPU。</textarea>
+  <label><input id="think" type="checkbox"> thinking</label>
+  <label><input id="spec" type="checkbox" checked> speculative (MTP)</label>
+  <label>Max tokens <input id="maxnew" type="number" value="256"></label>
+  <button id="send" disabled>Generate</button>
+  <pre id="out"></pre>
+  <div id="chat-stats" class="muted"></div>
+</fieldset>
+
+<script type="module">
+import init, { WebEngine } from "./pkg/webyiq_web.js";
+// tokenizer only; inference is ours
+import { PreTrainedTokenizer } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1";
+
+const $ = (id) => document.getElementById(id);
+const status = (s) => { $("status").textContent = s; console.log("[webyiq]", s); };
+let engine = null, tokenizer = null, manifest = null;
+window.__results = {};
+
+async function load() {
+  $("load").disabled = true;
+  const base = new URL($("model").value, location.href).href;
+  try {
+    await init();
+    if (!navigator.gpu) throw new Error("WebGPU not available");
+    manifest = await (await fetch(base + "manifest.json")).json();
+    const t0 = performance.now();
+    const packedInt8 = navigator.gpu.wgslLanguageFeatures?.has("packed_4x8_integer_dot_product") ?? false;
+    const q = new URLSearchParams(location.search);
+    engine = await WebEngine.create(JSON.stringify(manifest), +$("ctx").value, $("gpu").value === "hp",
+      packedInt8 && !q.has("nodp4a"), !q.has("nosubgroups"));
+    const tCreate = performance.now() - t0;
+    let bytes = 0;
+    // Shards are cached in the Cache API, keyed by URL + content hash (the manifest is always
+    // refetched). Up to 3 downloads in flight, uploaded as they land.
+    const cache = await caches.open("webyiq-weights").catch(() => null);
+    let done = 0, fromCache = 0;
+    const fetchShard = async (i) => {
+      const url = base + manifest.shards[i];
+      const key = manifest.shard_hashes ? `${url}?h=${manifest.shard_hashes[i]}` : url;
+      let r = cache && (await cache.match(key));
+      if (r) fromCache++;
+      else {
+        r = await fetch(url);
+        if (!r.ok) throw new Error(`${url}: ${r.status}`);
+        if (cache) await cache.put(key, r.clone()).catch(() => {});
+      }
+      const buf = new Uint8Array(await r.arrayBuffer());
+      bytes += buf.byteLength;
+      engine.upload_shard(i, buf);
+      status(`weights ${++done}/${manifest.shards.length} (${(bytes / 2 ** 20).toFixed(0)} MiB, ${fromCache} cached)`);
+    };
+    let next = 0;
+    await Promise.all(Array.from({ length: 3 }, async () => {
+      while (next < manifest.shards.length) await fetchShard(next++);
+    }));
+    await engine.prefill(new Uint32Array([manifest.config.bos_token_id ?? manifest.config.eos_token_ids[0]])); // warm-up + sync
+    engine.reset();
+    const tLoad = performance.now() - t0;
+
+    const [tj, tc, tmpl] = await Promise.all(
+      ["tokenizer.json", "tokenizer_config.json", "chat_template.jinja"].map((f, i) =>
+        fetch(base + f).then((r) => (i < 2 ? r.json() : r.ok ? r.text() : null))));
+    if (tmpl) tc.chat_template = tmpl;
+    tokenizer = new PreTrainedTokenizer(tj, tc);
+
+    const gpu = (await navigator.gpu.requestAdapter({ powerPreference: $("gpu").value === "hp" ? "high-performance" : "low-power" })).info;
+    window.__results.load = { adapter: `${gpu.vendor} ${gpu.architecture} ${gpu.description}`.trim(), engine: engine.adapter_info, create_ms: tCreate, load_ms: tLoad, bytes, cached_shards: fromCache };
+    status(`ready on ${window.__results.load.adapter} — ${(bytes / 2 ** 30).toFixed(2)} GiB in ${(tLoad / 1000).toFixed(1)} s (pipelines ${tCreate.toFixed(0)} ms)`);
+    $("spec").disabled = !engine.has_speculative;
+    $("spec").checked = engine.has_speculative && (await specWorthIt());
+    engine.set_speculative($("spec").checked);
+    status(`ready on ${window.__results.load.adapter} — ${(bytes / 2 ** 30).toFixed(2)} GiB in ${(tLoad / 1000).toFixed(1)} s` +
+      (engine.has_speculative ? `, speculative decoding ${$("spec").checked ? "on" : "off"} (${window.__results.load.spec_auto.reason})` : ""));
+    for (const id of ["bench", "profile", "send", "chatbench"]) $(id).disabled = false;
+  } catch (e) {
+    status("error: " + (e.message || e));
+    $("load").disabled = false;
+    throw e;
+  }
+}
+
+// Speculative steps cost the same whatever the acceptance, so whether they pay off on this GPU
+// follows from two timings: ms per plain token vs ms per speculative step (2 tokens + draft), with
+// the draft acceptance measured on chat prompts (~1.68 tokens per step for Qwen3.5-2B).
+const SPEC_TOKENS_PER_STEP = 1.68;
+async function specWorthIt(n = 24) {
+  const prompt = new Uint32Array(32).map((_, i) => 1000 + i * 37);
+  const timed = async (spec) => {
+    engine.set_speculative(spec);
+    engine.reset();
+    await engine.prefill(prompt);
+    await engine.next_token(4);  // fill the pipeline
+    const s0 = engine.spec_stats()[0];
+    const t = performance.now();
+    for (let i = 0; i < n; i++) await engine.next_token(4);
+    const ms = performance.now() - t;
+    const steps = engine.spec_stats()[0] - s0;
+    engine.discard_ahead();
+    return spec ? ms / steps : ms / n;
+  };
+  const plain = await timed(false), step = await timed(true);
+  engine.reset();
+  const gain = SPEC_TOKENS_PER_STEP * plain / step;
+  window.__results.load.spec_auto = { plain_ms_per_token: +plain.toFixed(2), spec_ms_per_step: +step.toFixed(2), expected_speedup: +gain.toFixed(2),
+    reason: `expected ${gain.toFixed(2)}x` };
+  return gain > 1.05;
+}
+
+async function bench() {
+  const plen = +$("plen").value, dlen = +$("dlen").value;
+  const prompt = new Uint32Array(plen).map((_, i) => 1000 + ((i * 37) % 50000));
+  // synthetic prompt, plain decoding (same protocol as tjs.html); see chatBench for speculative
+  engine.set_speculative(false);
+  engine.reset();
+  const t0 = performance.now();
+  await engine.prefill(prompt);
+  const tPre = performance.now() - t0;
+  const t1 = performance.now();
+  for (let i = 0; i < dlen; i++) await engine.step();
+  const tSync = performance.now() - t1;
+  engine.reset();
+  await engine.prefill(prompt);
+  const t2 = performance.now();
+  for (let i = 0; i < dlen; i++) await engine.next_token(4);
+  const tDec = performance.now() - t2;
+  engine.discard_ahead();
+  engine.set_speculative($("spec").checked);
+  const r = {
+    adapter: window.__results.load.adapter, prompt_tokens: plen, decode_tokens: dlen,
+    ttft_ms: +tPre.toFixed(1), prefill_tok_s: +(plen / tPre * 1000).toFixed(1),
+    decode_tok_s: +(dlen / tDec * 1000).toFixed(1), ms_per_token: +(tDec / dlen).toFixed(2),
+    decode_unpipelined_tok_s: +(dlen / tSync * 1000).toFixed(1),
+  };
+  window.__results.bench = r;
+  $("bench-out").textContent = JSON.stringify(r, null, 1);
+}
+
+async function profile() {
+  let spec = null;
+  if (engine.has_speculative) {
+    engine.set_speculative(true);
+    engine.reset();
+    await engine.prefill(new Uint32Array(255).map((_, i) => 1000 + i * 37));
+    spec = JSON.parse(await engine.profile_spec());
+  }
+  engine.set_speculative(false);
+  engine.reset();
+  await engine.prefill(new Uint32Array(255).map((_, i) => 1000 + i * 37));
+  const rows = JSON.parse(await engine.profile_step());
+  const total = rows.reduce((a, r) => a + r[1], 0);
+  engine.reset();
+  const pre = JSON.parse(await engine.profile_prefill(new Uint32Array(128).map((_, i) => 1000 + i * 37)));
+  engine.set_speculative($("spec").checked);
+  window.__results.profile = { pos: 256, total_us: total, rows, prefill128: pre, spec };
+  $("bench-out").textContent = `GPU time per decode step at pos 256: ${total.toFixed(0)} us\n` +
+    rows.map(([n, us, c]) => `${n.padEnd(14)} ${us.toFixed(0).padStart(7)} us ${(us / total * 100).toFixed(1).padStart(5)}%  x${c}`).join("\n");
+}
+
+const BENCH_PROMPTS = [
+  "Explain how a hash map works and when you would use one instead of a sorted array.",
+  "用三段话介绍一下长城的历史。",
+  "Write a Python function that returns the n-th Fibonacci number iteratively, with a docstring.",
+  "What are the main differences between TCP and UDP? Answer with a short table.",
+];
+
+// greedy generation (up to n tokens, stops at EOS) -> { out, ms }
+async function generate(ids, n) {
+  const eos = new Set(manifest.config.eos_token_ids);
+  engine.reset();
+  const out = [await engine.prefill(new Uint32Array(ids))];
+  const t = performance.now();
+  while (out.length < n && !eos.has(out.at(-1))) out.push(await engine.next_token(4));
+  const ms = performance.now() - t;
+  engine.discard_ahead();
+  return { out, ms };
+}
+
+// decode speed on real chat prompts, plain vs speculative (outputs must be identical)
+async function chatBench(n = 200) {
+  const r = { adapter: window.__results.load.adapter, prompts: BENCH_PROMPTS.length, max_tokens: n, identical: true };
+  let tokens = 0, plain = 0, spec = 0, steps = 0, stoks = 0;
+  for (const p of BENCH_PROMPTS) {
+    const ids = tokenizer.encode(tokenizer.apply_chat_template([{ role: "user", content: p }],
+      { tokenize: false, add_generation_prompt: true, enable_thinking: false }), { add_special_tokens: false });
+    engine.set_speculative(false);
+    const a = await generate(ids, n);
+    tokens += a.out.length - 1;
+    plain += a.ms;
+    if (engine.has_speculative) {
+      engine.set_speculative(true);
+      const b = await generate(ids, n);
+      spec += b.ms;
+      const [s, t] = engine.spec_stats();
+      steps += s;
+      stoks += t;
+      r.identical &&= a.out.length === b.out.length && a.out.every((v, i) => v === b.out[i]);
+    }
+  }
+  engine.set_speculative($("spec").checked);
+  r.tokens = tokens;
+  r.plain_tok_s = +(tokens / plain * 1000).toFixed(1);
+  if (engine.has_speculative) {
+    r.spec_tok_s = +(tokens / spec * 1000).toFixed(1);
+    r.tokens_per_step = +(stoks / steps).toFixed(3);
+    r.speedup = +(plain / spec).toFixed(3);
+  }
+  window.__results.chatbench = r;
+  $("bench-out").textContent = JSON.stringify(r, null, 1);
+}
+
+async function chat() {
+  $("send").disabled = true;
+  const text = tokenizer.apply_chat_template([{ role: "user", content: $("prompt").value }],
+    { tokenize: false, add_generation_prompt: true, enable_thinking: $("think").checked });
+  const ids = tokenizer.encode(text, { add_special_tokens: false });
+  const eos = new Set(manifest.config.eos_token_ids);
+  engine.set_speculative($("spec").checked);
+  engine.reset();
+  const out = [];
+  const t0 = performance.now();
+  let tok = await engine.prefill(new Uint32Array(ids));
+  const ttft = performance.now() - t0;
+  const t1 = performance.now();
+  while (!eos.has(tok) && out.length < +$("maxnew").value && engine.pos < engine.max_ctx) {
+    out.push(tok);
+    $("out").textContent = tokenizer.decode(out, { skip_special_tokens: true });
+    tok = await engine.next_token(4);
+  }
+  engine.discard_ahead();
+  const dt = performance.now() - t1;
+  const [steps, stoks] = engine.spec_stats();
+  $("chat-stats").textContent = `${ids.length} prompt tokens, TTFT ${ttft.toFixed(0)} ms, ${out.length} tokens at ${(out.length / dt * 1000).toFixed(1)} tok/s` +
+    (steps ? `, speculative: ${(stoks / steps).toFixed(2)} tokens/step` : "");
+  window.__results.chat = { text: $("out").textContent, prompt_tokens: ids.length, ttft_ms: ttft, tokens: out.length, tok_s: out.length / dt * 1000 };
+  $("send").disabled = false;
+}
+
+$("load").onclick = load;
+$("bench").onclick = () => bench().catch((e) => status("error: " + e.message));
+$("profile").onclick = () => profile().catch((e) => status("error: " + e.message));
+$("chatbench").onclick = () => chatBench().catch((e) => status("error: " + e.message));
+$("send").onclick = () => chat().catch((e) => { status("error: " + e.message); $("send").disabled = false; });
+const q = new URLSearchParams(location.search);
+if (q.get("gpu")) $("gpu").value = q.get("gpu");
+if (q.get("model")) $("model").value = `../models/${q.get("model")}/`;
+if (q.has("autoload") || q.has("autobench")) {
+  load().then(async () => {
+    if (!q.has("autobench")) return;
+    // run the standard set and report to the dev server (tools/serve.mjs)
+    const out = { load: window.__results.load, runs: [] };
+    for (const plen of [128, 1024]) {
+      $("plen").value = plen;
+      await bench();
+      out.runs.push(window.__results.bench);
+    }
+    await profile().catch(() => {});
+    out.profile = window.__results.profile;
+    await chatBench();
+    out.chatbench = window.__results.chatbench;
+    out.packed_int8 = navigator.gpu.wgslLanguageFeatures?.has("packed_4x8_integer_dot_product") ?? false;
+    await fetch("/report", { method: "POST", body: JSON.stringify(out) });
+    status("benchmark reported");
+  }).catch((e) => fetch("/report", { method: "POST", body: JSON.stringify({ error: String(e.stack || e) }) }));
+}
+</script>
+</body>
+</html>

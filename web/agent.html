@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>webyIQ Browser Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap">
+<link rel="stylesheet" href="lib/site.css">
+<style>
+  .stage { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(340px, 1fr); gap: 18px; margin-top: 28px; align-items: start; }
+  .browser { overflow: hidden; }
+  .bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+  .lights { display: flex; gap: 6px; }
+  .lights i { width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; }
+  .lights i:nth-child(3) { background: #28c840; }
+  .addr { flex: 1; display: flex; align-items: center; gap: 8px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 9px; padding: 6px 12px; font-size: 13px; color: var(--muted); min-width: 0; }
+  .addr span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .addr .lock { color: var(--ok); }
+  .navbtn { border: 0; background: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+  .navbtn:hover { color: var(--text); background: var(--bg-2); }
+  .viewport { position: relative; height: 72vh; min-height: 480px; background: #fff; }
+  iframe { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
+  .veil { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 55%, transparent); backdrop-filter: blur(2px); color: var(--text); font-weight: 600; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+  .veil.on { opacity: 1; }
+
+  .panel { display: flex; flex-direction: column; gap: 14px; }
+  .box { padding: 16px; }
+  .box h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); }
+  .sel { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .sel select { font: inherit; font-size: 14px; color: var(--text); background: var(--bg-2); border: 1px solid var(--border); border-radius: 9px; padding: 6px 8px; }
+  textarea { width: 100%; font: inherit; color: var(--text); background: var(--bg-2); border: 1px solid var(--border); border-radius: 11px; padding: 10px 12px; resize: vertical; min-height: 64px; outline: none; }
+  textarea:focus { border-color: var(--accent); }
+  .tasks { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 12px; }
+  .tasks button { font: inherit; font-size: 12.5px; color: var(--muted); background: var(--bg-2); border: 1px solid var(--border); border-radius: 999px; padding: 4px 11px; cursor: pointer; }
+  .tasks button:hover { color: var(--text); border-color: var(--faint); }
+  .go { display: flex; gap: 8px; align-items: center; }
+  .go .muted { font-size: 12.5px; margin-left: auto; }
+
+  .steps { display: flex; flex-direction: column; gap: 10px; max-height: 46vh; overflow-y: auto; padding: 2px; }
+  .step { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: var(--bg-2); animation: rise 0.25s ease-out; }
+  .step .top { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--faint); }
+  .step .top .t { margin-left: auto; font-family: var(--mono); }
+  .step .thought { margin: 6px 0; font-size: 14px; }
+  .act { display: inline-block; font-family: var(--mono); font-size: 12.5px; padding: 3px 8px; border-radius: 7px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: color-mix(in srgb, var(--accent) 70%, var(--text)); max-width: 100%; overflow-wrap: anywhere; }
+  .step .res { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .step.bad .act { background: color-mix(in srgb, var(--err) 16%, transparent); color: var(--err); }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+  .answer { display: none; padding: 16px 18px; border: 1px solid color-mix(in srgb, var(--ok) 40%, var(--border)); }
+  .answer.show { display: block; }
+  .answer .k { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ok); font-weight: 700; }
+  .answer .v { font-size: 20px; font-weight: 650; margin: 6px 0 8px; letter-spacing: -0.01em; }
+  .answer .s { font-size: 12.5px; color: var(--muted); font-family: var(--mono); }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); border-radius: 12px; overflow: hidden; }
+  .stats div { background: var(--surface); padding: 10px 12px; }
+  .stats .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); font-weight: 600; }
+  .stats .v { font-family: var(--mono); font-size: 18px; font-weight: 600; }
+  .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 26px; }
+  .how .card { padding: 16px 18px; }
+  .how b { display: block; margin-bottom: 4px; }
+  .how p { margin: 0; color: var(--muted); font-size: 14px; }
+  .measured { padding: 18px 20px; margin-top: 18px; }
+  .measured h3 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); }
+  .mrow { display: grid; grid-template-columns: 300px 1fr 70px; align-items: center; gap: 12px; font-size: 14px; padding: 4px 0; }
+  .mrow i { display: block; height: 10px; border-radius: 5px; width: max(var(--w), 6px); background: var(--grad); }
+  .mrow.t i { background: var(--tjs); }
+  .mrow b { font-family: var(--mono); text-align: right; }
+  .measured p { margin: 10px 0 0; font-size: 13px; }
+  @media (max-width: 700px) { .mrow { grid-template-columns: 1fr 60px; } .mrow i { grid-column: 1 / -1; grid-row: 2; } }
+  @media (max-width: 980px) {
+    .stage { grid-template-columns: 1fr; }
+    .viewport { height: 60vh; }
+    .how { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="nav">
+    <a class="logo" href="chat.html"><span class="logo-mark"></span>webyIQ</a>
+    <div class="nav-links">
+      <a href="chat.html">Chat arena</a>
+      <a class="active" href="agent.html">Browser agent</a>
+      <a href="index.html">Benchmarks</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <span class="eyebrow"><span class="dot"></span>Local model · real web pages · DOM actions</span>
+    <h1>A browser agent that thinks<br><span class="grad">on your own GPU.</span></h1>
+    <p class="lead">Give it a goal. A 2B model running in this tab reads the page, picks an element, clicks or types,
+      and keeps going until it has the answer. Every step re-reads the page, so it only works when the model is fast.</p>
+  </section>
+
+  <section class="stage">
+    <div class="browser card">
+      <div class="bar">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <button class="navbtn" id="nav-back" title="Back">←</button>
+        <div class="addr"><span class="lock">●</span><span id="addr">about:blank</span></div>
+      </div>
+      <div class="viewport">
+        <iframe id="frame" title="agent browser"></iframe>
+        <div class="veil" id="veil">loading page…</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="card box">
+        <h3>Engine</h3>
+        <div class="sel">
+          <select id="model"></select>
+          <select id="backend"><option value="w">webyIQ</option><option value="t">transformers.js (slow)</option></select>
+          <button class="btn" id="load">Load</button>
+        </div>
+        <div id="loadinfo" class="muted" style="font-size:13px">Not loaded.</div>
+        <div class="progress" id="loadbar" style="margin-top:8px" hidden><i></i></div>
+      </div>
+
+      <div class="card box">
+        <h3>Goal</h3>
+        <textarea id="goal" rows="2"></textarea>
+        <div class="tasks" id="tasks"></div>
+        <div class="go">
+          <button class="btn primary" id="run" disabled>Run agent</button>
+          <button class="btn" id="stop" disabled>Stop</button>
+          <span class="muted" id="runinfo"></span>
+        </div>
+      </div>
+
+      <div class="card box answer" id="answer">
+        <div class="k">Answer</div>
+        <div class="v" id="answer-text"></div>
+        <div class="s" id="answer-stats"></div>
+      </div>
+
+      <div class="stats" id="stats">
+        <div><div class="k">Steps</div><div class="v" id="st-steps">–</div></div>
+        <div><div class="k">Model time</div><div class="v" id="st-model">–</div></div>
+        <div><div class="k">Per step</div><div class="v" id="st-per">–</div></div>
+      </div>
+
+      <div class="card box">
+        <h3>Trace</h3>
+        <div class="steps" id="steps"><div class="muted" style="font-size:13px">The agent's thoughts and actions appear here.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="how">
+    <div class="card"><b>1 · Observe</b><p>The page in the frame is read through the DOM: numbered links, inputs and buttons, plus a window of its text.</p></div>
+    <div class="card"><b>2 · Decide</b><p>The local model gets the goal, the page and its previous steps (~1–2k tokens) and answers with one action.</p></div>
+    <div class="card"><b>3 · Act</b><p>The action runs on the DOM: click, type and submit, search the text, scroll, go back, or answer.</p></div>
+  </section>
+
+  <section class="card measured">
+    <h3>Measured: "When was the Eiffel Tower completed?" (2 steps, ~600 + ~1,400 prompt tokens)</h3>
+    <div class="mrow"><span>webyIQ · Qwen3.5-2B · RTX 5080</span><i style="--w:1%"></i><b>0.55 s</b></div>
+    <div class="mrow"><span>webyIQ · MiniCPM5-2B · RTX 5080</span><i style="--w:1%"></i><b>0.76 s</b></div>
+    <div class="mrow t"><span>transformers.js · MiniCPM5-2B · RTX 5080</span><i style="--w:2%"></i><b>1.9 s</b></div>
+    <div class="mrow"><span>webyIQ · Qwen3.5-2B · Radeon 2-CU iGPU</span><i style="--w:9%"></i><b>20 s</b></div>
+    <div class="mrow t"><span>transformers.js · Qwen3.5-2B · RTX 5080</span><i style="--w:100%"></i><b>234 s</b></div>
+    <p class="muted">Model time for the whole task in Chrome, greedy. transformers.js runs Qwen3.5's linear-attention layers through a generic ONNX graph; its prompt processing is what makes each step take minutes.</p>
+  </section>
+
+  <footer>Pages are fetched through the local dev server (<span class="mono">/proxy</span>, a short allowlist of public sites, scripts removed)
+    so that this page may read and operate their DOM; a cross-origin frame could not be touched. Greedy decoding, thinking mode off.</footer>
+</div>
+
+<script type="module">
+import { MODELS } from "./lib/models.js";
+import { loadWebyiq, loadTokenizer } from "./lib/webyiq.js";
+import { loadTjs } from "./lib/tjs.js";
+import { observePage, actOnPage } from "./lib/dom-agent.js";
+import { runAgent } from "./lib/agent-core.js";
+
+const $ = (id) => document.getElementById(id);
+const q = new URLSearchParams(location.search);
+
+// Wikipedia's search page: its form works without scripts (the header search box is collapsed then)
+const WIKI_EN = "https://en.wikipedia.org/wiki/Special:Search";
+const TASKS = [
+  { label: "Eiffel Tower", goal: "When was the Eiffel Tower completed?", start: WIKI_EN },
+  { label: "Sydney Opera House", goal: "Who was the architect of the Sydney Opera House?", start: WIKI_EN },
+  { label: "Hacker News", goal: "What is the title of the top story on Hacker News right now, and how many points does it have?", start: "https://news.ycombinator.com/" },
+  { label: "Two hops", goal: "Which river flows through the city where the Eiffel Tower stands?", start: WIKI_EN },
+  { label: "长城（中文）", goal: "长城的总长度是多少？", start: "https://zh.wikipedia.org/zh-cn/Special:%E6%90%9C%E7%B4%A2" },
+];
+const MAX_STEPS = +q.get("steps") || 10;
+
+// ---- engine ---------------------------------------------------------------------------------
+let backend = null, tokenizer = null, loadedKey = "";
+for (const [id, m] of Object.entries(MODELS)) $("model").append(new Option(m.name, id));
+if (q.get("model") in MODELS) $("model").value = q.get("model");
+if (q.get("backend")) $("backend").value = q.get("backend");
+
+async function load() {
+  const key = $("model").value + ":" + $("backend").value;
+  if (key === loadedKey) return;
+  $("load").disabled = $("run").disabled = true;
+  backend?.dispose();
+  backend = null;
+  const m = MODELS[$("model").value];
+  const bar = $("loadbar");
+  bar.hidden = false;
+  const prog = (text, frac) => {
+    $("loadinfo").textContent = text;
+    bar.querySelector("i").style.width = `${Math.round(frac * 100)}%`;
+  };
+  try {
+    tokenizer = await loadTokenizer(m.dir);
+    if ($("backend").value === "w") {
+      backend = await loadWebyiq(m.dir, {
+        tokenizer,
+        onProgress: (p) => prog(p.phase === "weights" ? `Loading ${m.name}: ${p.done}/${p.total} shards` : "Compiling kernels…", p.phase === "weights" ? p.done / p.total : 1),
+      });
+      $("loadinfo").textContent = `webyIQ · ${m.name} on ${backend.gpuName} · ready in ${(backend.loadMs / 1000).toFixed(1)} s`;
+    } else {
+      const eos = (await (await fetch(new URL(m.dir + "manifest.json", location.href))).json()).config.eos_token_ids;
+      backend = await loadTjs(m.onnx, {
+        eos,
+        onProgress: (p) => prog(p.phase === "weights" ? `Loading ${m.name} (ONNX)` : "Compiling kernels…", p.phase === "weights" ? p.bytes / p.total : 1),
+      });
+      $("loadinfo").textContent = `transformers.js · ${m.name} · ready in ${(backend.loadMs / 1000).toFixed(1)} s`;
+    }
+    loadedKey = key;
+    $("run").disabled = false;
+  } catch (e) {
+    $("loadinfo").textContent = `Failed to load: ${e.message || e}`;
+  } finally {
+    bar.hidden = true;
+    $("load").disabled = false;
+  }
+}
+$("model").onchange = $("backend").onchange = () => {
+  $("run").disabled = true;
+  $("loadinfo").textContent = "Press Load.";
+};
+
+// ---- browser frame --------------------------------------------------------------------------
+const frame = $("frame");
+const pages = []; // visited URLs
+const doc = () => frame.contentDocument;
+
+// load a page through the proxy; resolves to its title
+function navigate(url, record = true) {
+  return new Promise((resolve) => {
+    $("veil").classList.add("on");
+    frame.onload = () => {
+      $("veil").classList.remove("on");
+      const here = doc()?.baseURI ?? url;
+      if (record) pages.push(here);
+      $("addr").textContent = decodeURI(here);
+      hookFrame();
+      resolve(doc()?.title ?? "");
+    };
+    frame.src = "/proxy?url=" + encodeURIComponent(url);
+  });
+}
+
+// manual browsing in the frame goes through the proxy too
+function hookFrame() {
+  const d = doc();
+  if (!d) return;
+  d.addEventListener("click", (e) => {
+    const a = e.target.closest?.("a[href]");
+    if (!a) return;
+    e.preventDefault();
+    if (!running) navigate(a.href);
+  });
+  d.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (running) return;
+    const form = e.target, url = new URL(form.getAttribute("action") || d.baseURI, d.baseURI);
+    for (const [k, v] of new FormData(form, e.submitter)) if (typeof v === "string") url.searchParams.set(k, v);
+    navigate(url.href);
+  });
+}
+$("nav-back").onclick = () => !running && goBack();
+async function goBack() {
+  if (pages.length < 2) return "no previous page";
+  pages.pop();
+  return `opened "${await navigate(pages.at(-1), false)}"`;
+}
+
+const env = {
+  observe: async () => observePage(doc()),
+  act: (a) => actOnPage(doc(), a, { navigate }),
+  back: goBack,
+};
+
+// ---- agent ----------------------------------------------------------------------------------
+let running = false, abort = null;
+
+function stepCard(n) {
+  const box = $("steps");
+  if (n === 1) box.innerHTML = "";
+  const d = document.createElement("div");
+  d.className = "step";
+  d.innerHTML = `<div class="top"><b>Step ${n}</b><span class="t">thinking…</span></div><div class="thought"></div><span class="act"></span><div class="res"></div>`;
+  box.append(d);
+  box.scrollTop = box.scrollHeight;
+  return d;
+}
+
+async function run(goal, start) {
+  running = true;
+  abort = new AbortController();
+  $("run").disabled = true;
+  $("stop").disabled = false;
+  $("answer").classList.remove("show");
+  pages.length = 0;
+  await navigate(start);
+  let card = null, modelMs = 0;
+  const r = await runAgent({
+    goal, env, llm: backend, tokenizer, maxSteps: MAX_STEPS, signal: abort.signal, debug: q.has("debug"),
+    onEvent: (e) => {
+      if (e.type === "step") card = stepCard(e.n);
+      else if (e.type === "thought") card.querySelector(".thought").textContent = e.text;
+      else if (e.type === "done") {
+        const s = e.step;
+        modelMs += s.ms;
+        card.querySelector(".top .t").textContent = `${s.promptTokens} tok in · ${s.outTokens} out · ${(s.ms / 1000).toFixed(2)} s`;
+        card.querySelector(".thought").textContent = s.thought || "(no thought)";
+        card.querySelector(".act").textContent = s.action ?? "unreadable reply";
+        card.classList.toggle("bad", !s.action);
+        if (s.result !== "answer") card.querySelector(".res").textContent = "→ " + s.result;
+        $("st-steps").textContent = e.n;
+        $("st-model").textContent = `${(modelMs / 1000).toFixed(1)} s`;
+        $("st-per").textContent = `${(modelMs / e.n / 1000).toFixed(2)} s`;
+      }
+    },
+  });
+  $("answer-text").textContent = r.answer ?? (abort.signal.aborted ? "Stopped." : "No answer within the step limit.");
+  $("answer-stats").textContent = `${r.steps.length} steps · model ${(r.modelMs / 1000).toFixed(1)} s · total ${(r.totalMs / 1000).toFixed(1)} s (incl. page loads)`;
+  $("answer").classList.add("show");
+  running = false;
+  $("run").disabled = false;
+  $("stop").disabled = true;
+  return r;
+}
+
+let current = TASKS[0];
+for (const t of TASKS) {
+  const b = document.createElement("button");
+  b.textContent = t.label;
+  b.onclick = () => {
+    current = t;
+    $("goal").value = t.goal;
+    if (!running) navigate(t.start);
+  };
+  $("tasks").append(b);
+}
+$("goal").value = current.goal;
+$("load").onclick = load;
+$("run").onclick = () => run($("goal").value.trim(), current.start);
+$("stop").onclick = () => abort?.abort();
+navigate(current.start);
+
+// test hook: ?autotest=<task index>[&model=..&backend=w|t&steps=N&debug] runs one task and reports the trace
+if (q.has("autotest")) {
+  (async () => {
+    await load();
+    current = TASKS[+q.get("autotest") || 0];
+    $("goal").value = current.goal;
+    const r = await run(current.goal, current.start);
+    await fetch("/report", { method: "POST", body: JSON.stringify({ agenttest: { model: $("model").value, backend: $("backend").value, gpu: backend.gpuName ?? "", ...r } }) });
+  })().catch((e) => fetch("/report", { method: "POST", body: JSON.stringify({ error: String(e.stack || e) }) }));
+}
+</script>
+</body>
+</html>

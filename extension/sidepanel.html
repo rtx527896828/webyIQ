@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>webyIQ Agent</title>
+<link rel="stylesheet" href="lib/site.css">
+<link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+<header class="top">
+  <span class="logo-mark"></span>
+  <div>
+    <div class="name">webyIQ Agent</div>
+    <div class="sub">a local model operates this page</div>
+  </div>
+  <span class="pill" id="status">not loaded</span>
+</header>
+
+<section class="card box">
+  <h3>Model</h3>
+  <div class="row">
+    <select id="source">
+      <option value="url:http://127.0.0.1:8765/models/qwen3.5-2b-gptq/">Qwen3.5-2B · local server</option>
+      <option value="url:http://127.0.0.1:8765/models/minicpm5-2b-gptq/">MiniCPM5-2B · local server</option>
+      <option value="custom">Model URL…</option>
+      <option value="folder">Model folder on disk…</option>
+    </select>
+    <button class="btn primary" id="load">Load</button>
+  </div>
+  <input id="url" type="url" placeholder="https://…/qwen3.5-2b-gptq/" hidden>
+  <div class="hint" id="folderhint" hidden>Pick a converted webyIQ model folder (manifest.json + shards).</div>
+  <div class="progress" id="bar" hidden><i></i></div>
+  <div class="info" id="info">Weights are cached after the first load.</div>
+</section>
+
+<section class="card box">
+  <h3>Goal</h3>
+  <textarea id="goal" rows="3" placeholder="e.g. Search this site for “WebGPU” and tell me the title of the first result"></textarea>
+  <div class="examples" id="examples"></div>
+  <div class="row">
+    <button class="btn primary" id="run" disabled>Run on this tab</button>
+    <button class="btn" id="stop" disabled>Stop</button>
+  </div>
+  <div class="hint" id="tabinfo"></div>
+</section>
+
+<section class="card box answer" id="answer" hidden>
+  <div class="k">Answer</div>
+  <div class="v" id="answer-text"></div>
+  <div class="s" id="answer-stats"></div>
+</section>
+
+<section class="steps" id="steps"></section>
+
+<footer class="foot">The model runs on your GPU in this panel. Each step reads the page's links, inputs and text and performs one action in the tab.</footer>
+
+<script src="testlog.js"></script>
+<script type="module" src="sidepanel.js"></script>
+</body>
+</html>

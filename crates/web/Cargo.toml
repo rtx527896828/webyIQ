@@ -1,0 +1,15 @@
+[package]
+name = "webyiq-web"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+webyiq-engine = { path = "../engine" }
+wgpu = { workspace = true, features = ["webgpu"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"

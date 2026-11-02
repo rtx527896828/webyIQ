@@ -1,0 +1,11 @@
+/target
+/models
+/web/pkg
+/web/node_modules
+__pycache__/
+.venv/
+
+/extension/lib
+/extension/vendor
+/extension/pkg
+/extension/icons

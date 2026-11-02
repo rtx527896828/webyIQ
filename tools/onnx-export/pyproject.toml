@@ -1,0 +1,26 @@
+[project]
+name = "onnx-export"
+version = "0.1.0"
+description = "ONNX export of MiniCPM5-2B for transformers.js benchmarking"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "onnxruntime-genai",
+    "onnxruntime",
+    "onnx",
+    "onnx-ir",
+    "torch",
+    "transformers",
+    "safetensors",
+    "numpy",
+]
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }

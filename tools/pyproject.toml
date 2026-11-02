@@ -1,0 +1,16 @@
+[project]
+name = "webyiq-tools"
+version = "0.1.0"
+requires-python = ">=3.11,<3.14"
+dependencies = ["numpy", "torch", "transformers>=5.6", "jinja2", "pyarrow"]
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }

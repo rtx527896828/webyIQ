@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>webyIQ Chat Arena</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap">
+<link rel="stylesheet" href="lib/site.css">
+<style>
+  .arena { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 30px; }
+  .lane { display: flex; flex-direction: column; min-height: 560px; overflow: hidden; }
+  .lane-head { display: flex; align-items: center; gap: 12px; padding: 16px 18px 12px; }
+  .lane-badge { width: 34px; height: 34px; border-radius: 10px; flex: none; display: grid; place-items: center; font-weight: 800; font-size: 14px; color: #fff; }
+  .lane.w .lane-badge { background: var(--grad); }
+  .lane.t .lane-badge { background: linear-gradient(135deg, #f59e0b, #ea580c); }
+  .lane-title { font-weight: 700; letter-spacing: -0.01em; }
+  .lane-sub { font-size: 12.5px; color: var(--muted); }
+  .lane-head .pill { margin-left: auto; }
+  .metrics { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 1px; background: var(--border); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .metric { background: var(--surface); padding: 12px 16px; }
+  .metric .k { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); font-weight: 600; }
+  .metric .v { font-family: var(--mono); font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
+  .metric .v small { font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 3px; }
+  .metric.big .v { font-size: 30px; }
+  .lane.w .metric.big .v { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lane.t .metric.big .v { color: var(--tjs); }
+  .speed { height: 3px; background: var(--surface-2); }
+  .speed > i { display: block; height: 100%; width: 0; transition: width 0.25s ease-out; }
+  .lane.w .speed > i { background: var(--grad); }
+  .lane.t .speed > i { background: var(--tjs); }
+  .load { padding: 10px 18px 0; font-size: 13px; color: var(--muted); }
+  .load .progress { margin-top: 6px; }
+  .transcript { flex: 1; overflow-y: auto; padding: 16px 18px 20px; display: flex; flex-direction: column; gap: 12px; max-height: 62vh; }
+  .msg { max-width: 92%; padding: 10px 14px; border-radius: 14px; font-size: 14.5px; overflow-wrap: anywhere; }
+  .msg.user { align-self: flex-end; background: var(--surface-2); border: 1px solid var(--border); white-space: pre-wrap; }
+  .msg.bot { align-self: flex-start; background: transparent; border: 1px solid var(--border); }
+  .msg.bot.pending::after { content: ""; display: inline-block; width: 7px; height: 15px; margin-left: 2px; vertical-align: -2px; background: var(--muted); animation: blink 1s steps(2) infinite; }
+  .msg .meta { margin-top: 8px; font-size: 12px; color: var(--faint); font-family: var(--mono); }
+  .msg.err { border-color: color-mix(in srgb, var(--err) 50%, var(--border)); color: var(--err); white-space: pre-wrap; }
+  .empty { margin: auto; text-align: center; color: var(--faint); font-size: 14px; max-width: 280px; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .verdict { margin-top: 18px; padding: 18px 22px; display: none; align-items: center; gap: 28px; flex-wrap: wrap; }
+  .verdict.show { display: flex; }
+  .verdict .x { font-size: 34px; font-weight: 800; letter-spacing: -0.03em; }
+  .verdict .lbl { color: var(--muted); font-size: 13px; }
+  .verdict .note { margin-left: auto; color: var(--muted); font-size: 13px; max-width: 360px; }
+
+  .composer { margin-top: 18px; padding: 14px; }
+  .suggest { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .suggest button { font: inherit; font-size: 13px; color: var(--muted); background: var(--bg-2); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+  .suggest button:hover { color: var(--text); border-color: var(--faint); }
+  .row { display: flex; gap: 10px; align-items: flex-end; }
+  textarea { flex: 1; font: inherit; color: var(--text); background: var(--bg-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; resize: none; min-height: 50px; max-height: 180px; outline: none; }
+  textarea:focus { border-color: var(--accent); }
+  .opts { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--muted); }
+  .opts label { display: inline-flex; align-items: center; gap: 6px; }
+  .opts select { font: inherit; color: var(--text); background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 3px 6px; }
+
+  @media (max-width: 900px) {
+    .arena { grid-template-columns: 1fr; }
+    .lane { min-height: 380px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="nav">
+    <a class="logo" href="chat.html"><span class="logo-mark"></span>webyIQ</a>
+    <div class="nav-links">
+      <a class="active" href="chat.html">Chat arena</a>
+      <a href="agent.html">Browser agent</a>
+      <a href="index.html">Benchmarks</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <span class="eyebrow"><span class="dot"></span>Runs entirely in your browser on WebGPU</span>
+    <h1>Same model. Same GPU.<br><span class="grad">A different league.</span></h1>
+    <p class="lead">webyIQ is an LLM engine specialized per model, written in Rust, WebAssembly and hand-tuned WGSL.
+      Ask it and transformers.js the same question and feel the difference. No server, nothing leaves your machine.</p>
+    <div class="controls">
+      <div class="seg" id="models"></div>
+      <button class="btn primary" id="load">Load both engines</button>
+      <span class="chip" id="gpu">GPU: <b>not loaded</b></span>
+      <span class="chip" id="specchip" hidden></span>
+    </div>
+  </section>
+
+  <section class="arena">
+    <div class="lane card w" id="lane-w">
+      <div class="lane-head">
+        <div class="lane-badge">IQ</div>
+        <div><div class="lane-title">webyIQ</div><div class="lane-sub">Rust + WASM + WGSL · int4 GPTQ · fused kernels</div></div>
+        <span class="pill" data-status>idle</span>
+      </div>
+      <div class="load" data-load hidden><span data-load-text></span><div class="progress"><i></i></div></div>
+      <div class="metrics">
+        <div class="metric"><div class="k">First token</div><div class="v" data-ttft>–</div></div>
+        <div class="metric big"><div class="k">Generation</div><div class="v" data-speed>–</div></div>
+        <div class="metric"><div class="k">Tokens</div><div class="v" data-tokens>–</div></div>
+      </div>
+      <div class="speed"><i data-bar></i></div>
+      <div class="transcript" data-transcript><div class="empty">Load the engines, then ask anything.</div></div>
+    </div>
+
+    <div class="lane card t" id="lane-t">
+      <div class="lane-head">
+        <div class="lane-badge">TJ</div>
+        <div><div class="lane-title">transformers.js 4.3</div><div class="lane-sub">ONNX Runtime Web · q4f16 · WebGPU</div></div>
+        <span class="pill" data-status>idle</span>
+      </div>
+      <div class="load" data-load hidden><span data-load-text></span><div class="progress"><i></i></div></div>
+      <div class="metrics">
+        <div class="metric"><div class="k">First token</div><div class="v" data-ttft>–</div></div>
+        <div class="metric big"><div class="k">Generation</div><div class="v" data-speed>–</div></div>
+        <div class="metric"><div class="k">Tokens</div><div class="v" data-tokens>–</div></div>
+      </div>
+      <div class="speed"><i data-bar></i></div>
+      <div class="transcript" data-transcript><div class="empty">The baseline: the same model through the generic ONNX path.</div></div>
+    </div>
+  </section>
+
+  <section class="verdict card" id="verdict">
+    <div><div class="x grad" id="v-ttft">–</div><div class="lbl">faster first token</div></div>
+    <div><div class="x grad" id="v-speed">–</div><div class="lbl">faster generation</div></div>
+    <div class="note">Measured just now on your GPU. The engines answer one after the other so they never share the GPU; <b>Replay side by side</b> plays both back at their real speed.</div>
+  </section>
+
+  <section class="composer card">
+    <div class="suggest" id="suggest"></div>
+    <div class="row">
+      <textarea id="prompt" rows="2" placeholder="Ask both engines… (Enter to send, Shift+Enter for a new line)"></textarea>
+      <button class="btn primary" id="send" disabled>Send</button>
+      <button class="btn" id="stop" disabled>Stop</button>
+    </div>
+    <div class="opts">
+      <label>Max tokens <select id="maxtok"><option>128</option><option>256</option><option selected>384</option><option>768</option></select></label>
+      <label><input type="checkbox" id="runtjs" checked> also run transformers.js</label>
+      <button class="btn" id="replay" disabled>Replay side by side</button>
+      <button class="btn" id="clear">New chat</button>
+    </div>
+  </section>
+
+  <footer>Greedy decoding on both sides, same tokenizer and chat template, thinking mode off. webyIQ weights: int4 (GPTQ) with
+    int8 activations; transformers.js: the ONNX q4f16 export. Numbers are live measurements in this tab.</footer>
+</div>
+
+<script type="module">
+import { marked } from "https://cdn.jsdelivr.net/npm/marked@12.0.2/lib/marked.esm.js";
+import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.es.mjs";
+import { MODELS } from "./lib/models.js";
+import { loadWebyiq, loadTokenizer, chatIds } from "./lib/webyiq.js";
+import { loadTjs } from "./lib/tjs.js";
+
+const $ = (id) => document.getElementById(id);
+const q = new URLSearchParams(location.search);
+const SUGGEST = [
+  "Explain how a hash map works, briefly.",
+  "用三句话介绍一下长城。",
+  "Write a Python function that checks if a string is a palindrome.",
+  "Give me 5 creative names for a coffee shop on Mars.",
+  "TCP vs UDP — answer with a short table.",
+];
+
+let modelId = q.get("model") in MODELS ? q.get("model") : "qwen3.5-2b";
+let tokenizer = null;
+let busy = false, abort = null;
+const lanes = {
+  w: { el: $("lane-w"), backend: null, history: [], last: null },
+  t: { el: $("lane-t"), backend: null, history: [], last: null },
+};
+const part = (lane, name) => lane.el.querySelector(`[data-${name}]`);
+const render = (ids) => DOMPurify.sanitize(marked.parse(tokenizer.decode(ids, { skip_special_tokens: true })));
+
+function status(lane, text, cls = "") {
+  const p = part(lane, "status");
+  p.textContent = text;
+  p.className = "pill " + cls;
+}
+function setMetrics(lane, s, scale) {
+  part(lane, "ttft").innerHTML = s ? fmtMs(s.ttftMs) : "–";
+  part(lane, "speed").innerHTML = s && s.decodeTokS ? `${s.decodeTokS.toFixed(1)}<small>tok/s</small>` : "–";
+  part(lane, "tokens").textContent = s ? s.tokens : "–";
+  part(lane, "bar").style.width = s && s.decodeTokS ? `${Math.min(100, (s.decodeTokS / scale) * 100)}%` : "0";
+}
+const fmtMs = (ms) => (ms < 1000 ? `${ms.toFixed(0)}<small>ms</small>` : `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)}<small>s</small>`);
+
+// model selector
+for (const [id, m] of Object.entries(MODELS)) {
+  const b = document.createElement("button");
+  b.textContent = m.name;
+  b.title = m.blurb;
+  b.onclick = () => selectModel(id);
+  b.dataset.id = id;
+  $("models").append(b);
+}
+function markModel() {
+  for (const b of $("models").children) b.classList.toggle("on", b.dataset.id === modelId);
+}
+async function selectModel(id) {
+  if (busy || id === modelId && lanes.w.backend) return;
+  modelId = id;
+  markModel();
+  for (const lane of Object.values(lanes)) {
+    lane.backend?.dispose();
+    lane.backend = null;
+    status(lane, "idle");
+  }
+  tokenizer = null;
+  clearChat();
+  $("send").disabled = true;
+  $("load").disabled = false;
+  $("gpu").innerHTML = "GPU: <b>not loaded</b>";
+  $("specchip").hidden = true;
+}
+markModel();
+
+for (const s of SUGGEST) {
+  const b = document.createElement("button");
+  b.textContent = s;
+  b.onclick = () => { $("prompt").value = s; $("prompt").focus(); };
+  $("suggest").append(b);
+}
+
+function progress(lane, text, frac) {
+  const box = part(lane, "load");
+  box.hidden = frac === null;
+  part(lane, "load-text").textContent = text;
+  box.querySelector("i").style.width = `${Math.round((frac ?? 0) * 100)}%`;
+}
+
+async function load() {
+  $("load").disabled = true;
+  busy = true;
+  const m = MODELS[modelId];
+  try {
+    tokenizer = await loadTokenizer(m.dir);
+    const eos = (await (await fetch(new URL(m.dir + "manifest.json", location.href))).json()).config.eos_token_ids;
+
+    status(lanes.w, "loading", "run");
+    lanes.w.backend = await loadWebyiq(m.dir, {
+      tokenizer,
+      onProgress: (p) => progress(lanes.w, p.phase === "weights" ? `weights ${p.done}/${p.total} · ${(p.bytes / 2 ** 30).toFixed(2)} GiB` : "compiling kernels…", p.phase === "weights" ? p.done / p.total : 1),
+    });
+    const w = lanes.w.backend;
+    progress(lanes.w, "", null);
+    status(lanes.w, `ready · ${(w.loadMs / 1000).toFixed(1)} s`, "ok");
+    $("gpu").innerHTML = `GPU: <b>${w.gpuName}</b>`;
+    if (w.spec) {
+      $("specchip").hidden = false;
+      $("specchip").innerHTML = `MTP speculative decoding: <b>${w.spec.on ? "on" : "off"}</b>`;
+      $("specchip").title = `expected gain on this GPU: ${w.spec.expected.toFixed(2)}x`;
+    }
+    $("send").disabled = false;
+
+    status(lanes.t, "loading", "run");
+    try {
+      lanes.t.backend = await loadTjs(m.onnx, {
+        eos,
+        onProgress: (p) => progress(lanes.t, p.phase === "weights" ? `weights ${(p.bytes / 2 ** 30).toFixed(2)} / ${(p.total / 2 ** 30).toFixed(2)} GiB` : "compiling kernels…", p.phase === "weights" ? p.bytes / p.total : 1),
+      });
+      progress(lanes.t, "", null);
+      status(lanes.t, `ready · ${(lanes.t.backend.loadMs / 1000).toFixed(1)} s`, "ok");
+    } catch (e) {
+      progress(lanes.t, "", null);
+      status(lanes.t, "failed", "err");
+      addMsg(lanes.t, "err", `transformers.js could not load this model on this GPU:\n${e.message || e}`);
+    }
+  } catch (e) {
+    status(lanes.w, "failed", "err");
+    addMsg(lanes.w, "err", String(e.message || e));
+    $("load").disabled = false;
+  } finally {
+    busy = false;
+  }
+}
+
+function addMsg(lane, kind, content) {
+  const box = part(lane, "transcript");
+  box.querySelector(".empty")?.remove();
+  const d = document.createElement("div");
+  d.className = `msg ${kind}`;
+  if (kind === "bot") d.classList.add("md");
+  d.textContent = content ?? "";
+  box.append(d);
+  box.scrollTop = box.scrollHeight;
+  return d;
+}
+
+function clearChat() {
+  for (const lane of Object.values(lanes)) {
+    lane.history = [];
+    lane.last = null;
+    part(lane, "transcript").innerHTML = '<div class="empty">Ask anything.</div>';
+    setMetrics(lane, null, 1);
+  }
+  $("verdict").classList.remove("show");
+  $("replay").disabled = true;
+}
+
+async function runLane(lane, maxTokens, scale) {
+  const bubble = addMsg(lane, "bot", "");
+  bubble.classList.add("pending");
+  status(lane, "generating", "run");
+  const box = part(lane, "transcript");
+  const times = [];
+  let frame = 0, latest = null;
+  const paint = () => {
+    frame = 0;
+    bubble.innerHTML = render(latest.ids);
+    setMetrics(lane, latest.s, scale());
+    box.scrollTop = box.scrollHeight;
+  };
+  const t0 = performance.now();
+  try {
+    const ids = chatIds(tokenizer, lane.history);
+    const r = await lane.backend.generate(ids, {
+      maxTokens,
+      signal: abort.signal,
+      onToken: (out, s) => {
+        times.push(performance.now() - t0);
+        latest = { ids: out.slice(), s };
+        frame ||= requestAnimationFrame(paint);
+      },
+    });
+    if (frame) cancelAnimationFrame(frame);
+    const text = tokenizer.decode(r.ids, { skip_special_tokens: true });
+    bubble.innerHTML = render(r.ids);
+    bubble.classList.remove("pending");
+    const s = { ttftMs: r.ttftMs, decodeTokS: r.decodeTokS, tokens: r.ids.length };
+    setMetrics(lane, s, scale());
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `${r.promptTokens} prompt tok · first token ${(r.ttftMs / 1000).toFixed(2)} s · ${r.ids.length} tok at ${r.decodeTokS.toFixed(1)} tok/s` +
+      (r.steps ? ` · ${(r.ids.length / r.steps).toFixed(2)} tok/step` : "");
+    bubble.append(meta);
+    lane.history.push({ role: "assistant", content: text });
+    lane.last = { ids: r.ids, times, stats: s, bubble };
+    status(lane, "done", "ok");
+    return s;
+  } catch (e) {
+    bubble.classList.remove("pending");
+    bubble.classList.add("err");
+    bubble.textContent = `error: ${e.message || e}`;
+    status(lane, "failed", "err");
+    lane.history.pop(); // drop the user turn this lane could not answer
+    return null;
+  }
+}
+
+async function send() {
+  const text = $("prompt").value.trim();
+  if (!text || busy || !lanes.w.backend) return;
+  busy = true;
+  $("prompt").value = "";
+  $("send").disabled = true;
+  $("stop").disabled = false;
+  $("replay").disabled = true;
+  $("verdict").classList.remove("show");
+  abort = new AbortController();
+  const maxTokens = +$("maxtok").value;
+  const active = [lanes.w, ...(lanes.t.backend && $("runtjs").checked ? [lanes.t] : [])];
+  for (const lane of active) {
+    lane.history.push({ role: "user", content: text });
+    addMsg(lane, "user", text);
+    lane.last = null;
+  }
+  const scale = () => Math.max(1, ...active.map((l) => l.last?.stats.decodeTokS ?? 0), 60);
+  const results = [];
+  for (const lane of active) {
+    if (abort.signal.aborted) break;
+    results.push(await runLane(lane, maxTokens, scale));
+  }
+  for (const lane of active) if (lane.last) setMetrics(lane, lane.last.stats, scale());
+  const [w, t] = results;
+  if (w && t) {
+    $("v-ttft").textContent = `${(t.ttftMs / w.ttftMs).toFixed(1)}×`;
+    $("v-speed").textContent = `${(w.decodeTokS / t.decodeTokS).toFixed(1)}×`;
+    $("verdict").classList.add("show");
+    $("replay").disabled = false;
+  }
+  window.__round = { model: modelId, webyiq: w, tjs: t, adapter: lanes.w.backend.adapter };
+  busy = false;
+  $("send").disabled = false;
+  $("stop").disabled = true;
+}
+
+// play both last answers back from the moment of sending, at the speed they were produced
+function replay() {
+  const ls = [lanes.w, lanes.t].filter((l) => l.last);
+  const t0 = performance.now();
+  const end = Math.max(...ls.map((l) => l.last.times.at(-1) ?? 0));
+  for (const l of ls) {
+    l.last.bubble.innerHTML = "";
+    l.last.bubble.classList.add("pending");
+    setMetrics(l, null, 1);
+    status(l, "replaying", "run");
+  }
+  const scale = Math.max(...ls.map((l) => l.last.stats.decodeTokS), 60);
+  const tick = () => {
+    const now = performance.now() - t0;
+    for (const l of ls) {
+      const { times, ids, stats, bubble } = l.last;
+      let n = 0;
+      while (n < times.length && times[n] <= now) n++;
+      if (n) bubble.innerHTML = render(ids.slice(0, n));
+      if (n === times.length) bubble.classList.remove("pending");
+      const dec = n > 1 ? (n - 1) / (Math.min(now, times[n - 1]) - times[0]) * 1000 : 0;
+      setMetrics(l, n ? { ttftMs: stats.ttftMs, decodeTokS: n === times.length ? stats.decodeTokS : dec, tokens: n } : null, scale);
+      const box = part(l, "transcript");
+      box.scrollTop = box.scrollHeight;
+    }
+    if (now < end) requestAnimationFrame(tick);
+    else for (const l of ls) status(l, "done", "ok");
+  };
+  requestAnimationFrame(tick);
+}
+
+$("load").onclick = load;
+$("send").onclick = send;
+$("stop").onclick = () => abort?.abort();
+$("replay").onclick = replay;
+$("clear").onclick = () => !busy && clearChat();
+$("prompt").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+
+// test hook: ?autotest[&model=...] loads, asks one question, reports to the dev server
+if (q.has("autotest")) {
+  (async () => {
+    await load();
+    $("prompt").value = q.get("prompt") ?? SUGGEST[0];
+    await send();
+    const strip = (l) => l.last && { tokens: l.last.ids.length, ...l.last.stats, text: l.history.at(-1)?.content.slice(0, 300) };
+    await fetch("/report", { method: "POST", body: JSON.stringify({ chattest: { ...window.__round, w: strip(lanes.w), t: strip(lanes.t) } }) });
+  })().catch((e) => fetch("/report", { method: "POST", body: JSON.stringify({ error: String(e.stack || e) }) }));
+}
+</script>
+</body>
+</html>

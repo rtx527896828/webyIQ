@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>transformers.js bench</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 920px; margin: 24px auto; padding: 0 16px; }
+  pre { background: color-mix(in srgb, currentColor 6%, transparent); padding: 10px; border-radius: 6px; white-space: pre-wrap; }
+  label { margin-right: 14px; }
+  input[type=number] { width: 72px; }
+</style>
+</head>
+<body>
+<h1>transformers.js baseline</h1>
+<p>Same protocol as <a href="index.html">index.html</a>: synthetic prompt ids, greedy decode, TTFT = time to first generated token.</p>
+<label>Model <input id="model" value="MiniCPM5-2B-ONNX" size="24"></label>
+<label>Prompt tokens <input id="plen" type="number" value="128"></label>
+<label>Decode tokens <input id="dlen" type="number" value="128"></label>
+<button id="run">Load + run</button>
+<pre id="out">idle</pre>
+
+<script type="module">
+import { AutoModelForCausalLM, Tensor, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1";
+
+const $ = (id) => document.getElementById(id);
+const log = (s) => { $("out").textContent = s; console.log("[tjs]", s); };
+window.__results = {};
+env.allowRemoteModels = false;
+env.allowLocalModels = true;
+env.localModelPath = new URL("../models/onnx/", location.href).href;
+
+async function run() {
+  const t0 = performance.now();
+  log("loading...");
+  const model = await AutoModelForCausalLM.from_pretrained($("model").value, { dtype: "q4f16", device: "webgpu" });
+  const loadMs = performance.now() - t0;
+
+  const gen = async (plen, dlen) => {
+    const ids = Array.from({ length: plen }, (_, i) => 1000n + BigInt((i * 37) % 50000));
+    const input_ids = new Tensor("int64", BigInt64Array.from(ids), [1, plen]);
+    const attention_mask = new Tensor("int64", new BigInt64Array(plen).fill(1n), [1, plen]);
+    const stamps = [];
+    const streamer = { put: (v) => stamps.push(performance.now()), end: () => {} };
+    const ts = performance.now();
+    await model.generate({ input_ids, attention_mask, max_new_tokens: dlen, min_new_tokens: dlen, do_sample: false, streamer });
+    // the first put() carries the prompt
+    const tok = stamps.slice(1);
+    return { ttft: tok[0] - ts, decode: (tok.length - 1) / (tok.at(-1) - tok[0]) * 1000, n: tok.length };
+  };
+
+  log("warm-up...");
+  await gen(16, 8);
+  const plen = +$("plen").value, dlen = +$("dlen").value;
+  const r = await gen(plen, dlen);
+  const gpu = (await navigator.gpu.requestAdapter()).info;
+  window.__results.bench = {
+    engine: `transformers.js 4.3.1 ${$("model").value} (q4f16, webgpu)`, adapter: `${gpu.vendor} ${gpu.architecture}`,
+    load_ms: +loadMs.toFixed(0), prompt_tokens: plen, decode_tokens: r.n,
+    ttft_ms: +r.ttft.toFixed(1), prefill_tok_s: +(plen / r.ttft * 1000).toFixed(1), decode_tok_s: +r.decode.toFixed(1),
+  };
+  log(JSON.stringify(window.__results.bench, null, 1));
+}
+
+async function runAll() {
+  // standard set, reported to the dev server (tools/serve.mjs)
+  const runs = [];
+  for (const plen of [128, 1024]) {
+    $("plen").value = plen;
+    await run();
+    runs.push(window.__results.bench);
+  }
+  await fetch("/report", { method: "POST", body: JSON.stringify({ tjs: runs }) });
+  log("reported\n" + JSON.stringify(runs, null, 1));
+}
+
+$("run").onclick = () => run().catch((e) => { log("error: " + (e.stack || e)); window.__results.error = String(e); });
+const q = new URLSearchParams(location.search);
+if (q.get("model")) $("model").value = q.get("model");
+if (q.has("autobench")) runAll().catch((e) => fetch("/report", { method: "POST", body: JSON.stringify({ error: String(e.stack || e) }) }));
+else if (q.has("autorun")) $("run").click();
+</script>
+</body>
+</html>

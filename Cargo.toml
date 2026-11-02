@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = ["crates/engine", "crates/cli", "crates/web"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+wgpu = { version = "30", default-features = false, features = ["wgsl"] }
+bytemuck = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-channel = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+debug = "line-tables-only"
+
+# wgpu 30.0.1 + `subgroups` in the WebGPU feature mapping (see vendor/wgpu/src/backend/webgpu.rs)
+[patch.crates-io]
+wgpu = { path = "vendor/wgpu" }

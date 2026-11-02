@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WebGPU probe</title>
+<pre id="out">probing...</pre>
+<script type="module">
+// Reports which WebGPU adapters this browser exposes (to /report on the dev server).
+const out = { wgsl: [...(navigator.gpu?.wgslLanguageFeatures ?? [])] };
+for (const powerPreference of ["high-performance", "low-power"]) {
+  const a = await navigator.gpu?.requestAdapter({ powerPreference });
+  out[powerPreference] = a && {
+    vendor: a.info.vendor, architecture: a.info.architecture, description: a.info.description,
+    features: [...a.features], maxStorageBufferBindingSize: a.limits.maxStorageBufferBindingSize,
+  };
+}
+document.getElementById("out").textContent = JSON.stringify(out, null, 1);
+await fetch("/report", { method: "POST", body: JSON.stringify({ probe: out }) });
+</script>

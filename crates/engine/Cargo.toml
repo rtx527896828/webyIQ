@@ -1,0 +1,12 @@
+[package]
+name = "webyiq-engine"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+wgpu.workspace = true
+bytemuck.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures-channel.workspace = true
